@@ -37,7 +37,7 @@ At the start of every task, ask the user for:
    - Duration
    - Loop behavior: one-shot, seamless loop, or interaction-triggered
    - Background: transparent, solid color, gradient, video-ready, or dark/light
-   - Sound design: none, mood only, or full sound brief
+   - Sound: do **not** ask here. Ask once the visual animation is approved (see **Sound design**).
 
 Do not begin production until the logo is available or the user explicitly asks for a placeholder concept.
 
@@ -245,6 +245,85 @@ Always include:
 
 Provide a static final logo state for users who disable motion. Do not use flashing effects or motion as the only way to communicate brand information.
 
+## Sound design
+
+### When to ask
+
+Sound comes **last**. After the user approves the visual animation, ask exactly once:
+
+> "Do you want sound on this animation? **None** · **Subtle** (soft whoosh / tick) · **Full sting** (rise + whoosh + impact + tail)"
+
+- **None** → deliver silent. Never add sound by default.
+- Otherwise ask for mood words (e.g. "clean tech", "warm", "cinematic", "playful") and continue below.
+
+### Sourcing free sounds
+
+Check these libraries first. Use only sounds whose license allows the user's use (brand work = **commercial**).
+
+| Library | URL | License notes (verify on the site before use) |
+|---|---|---|
+| SFXMint | https://sfxmint.com | Listed as CC0 (no attribution); free tier has daily download limits, MP3 only |
+| Pixabay Sound Effects | https://pixabay.com/sound-effects/ | Pixabay Content License: commercial use, no attribution; cannot be resold as standalone audio |
+| Mixkit | https://mixkit.co/free-sound-effects/ | Mixkit Free License: commercial use, no attribution |
+| Zapsplat | https://www.zapsplat.com | Free account; free-tier terms may require attribution, so check |
+| Freesound | https://freesound.org | License varies **per sound**: use CC0, or CC-BY with credit. Never CC-BY-NC for brand work |
+| 99Sounds / BigSoundBank | https://99sounds.org · https://bigsoundbank.com | Royalty-free packs; check each pack's terms |
+
+**Avoid:** BBC Sound Effects (non-commercial only), YouTube rips, and any file whose license you cannot confirm.
+
+**Online search option.** If these libraries don't have the right sound, or the user wants more choice, search the web (for example `"<sound type> sound effect CC0 free download"`). Present 3–5 candidates as **link · length · license**, and let the user pick.
+
+**Before downloading anything, ask the user**, stating the filename, source and license. Users can also download files themselves and upload them.
+
+**Fully original fallback:** synthesize simple cues (sine/noise whooshes, clicks, soft hits) with Web Audio or `ffmpeg -f lavfi` (`sine`, `anoisesrc` plus filters). These need no license.
+
+### Spotting: sync map
+
+Derive every cue from the storyboard beat map, timed in **milliseconds**:
+
+| Time (ms) | Visual event | Sound | Edit note |
+|---|---|---|---|
+| 0–400 | Stage enters | Low rise / air | Fade in 150 ms |
+| 400 | Symbol starts moving | Whoosh | Align the whoosh **peak** with peak motion velocity, not its start |
+| 1180 | Logo locks into place | Impact / hit | Transient lands **on the lock frame** |
+| 1400–2600 | Light sweep / hold | Shimmer + tail | Decays into the final hold |
+
+Less is more: 2–4 cues for a 2–3 s sting. Sound must support the motion, never compete with it.
+
+### Precise editing (ffmpeg)
+
+1. **Find the transient onset** of each file (waveform: `ffmpeg -i hit.wav -filter_complex showwavespic=s=1600x200 wave.png`, or `silencedetect=n=-40dB:d=0.01`). Placement offset = cue time − onset time.
+2. **Trim** dead air and **fade** edges: 5–10 ms fade-in, longer fade-out, so nothing clicks.
+3. **Place** each cue with `adelay` and mix with `amix=normalize=0`. Pad or trim the result to the **exact** animation duration.
+4. **Loudness:** social/video −14 LUFS integrated, true peak ≤ −1 dBTP (`loudnorm=I=-14:TP=-1`). Web/app UI should be much quieter (about −20 to −24 LUFS).
+5. **Format:** 48 kHz. Master as WAV; deliver AAC 192 kbps inside MP4.
+6. **Loops:** audio length = loop length to the sample, with a short crossfade at the seam.
+
+```bash
+# Example: 3.0 s sting (whoosh at 400 ms, impact at 1180 ms, shimmer at 1400 ms)
+ffmpeg -i whoosh.wav -i impact.wav -i shimmer.wav -filter_complex "\
+[0]atrim=start=0.12,asetpts=PTS-STARTPTS,afade=t=in:d=0.01,adelay=280:all=1[a];\
+[1]atrim=start=0.004,asetpts=PTS-STARTPTS,adelay=1180:all=1[b];\
+[2]afade=t=out:st=0.9:d=0.6,adelay=1400:all=1[c];\
+[a][b][c]amix=inputs=3:normalize=0,apad,atrim=0:3.0,loudnorm=I=-14:TP=-1:LRA=7" \
+-ar 48000 sound/sting.wav
+
+# Mux onto the rendered animation
+ffmpeg -i logo.mp4 -i sound/sting.wav -c:v copy -c:a aac -b:a 192k -shortest logo-with-sound.mp4
+```
+
+**Verify sync:** the impact peak must fall within **one frame** of the visual lock (16.7 ms at 60 fps, 33.3 ms at 30 fps). Check it by stepping the MP4 frame by frame or with `astats`/`silencedetect` timestamps. Adjust `adelay` until it does.
+
+### Web delivery
+
+- Browsers block autoplay with sound. Start audio only from a user gesture (Play/tap), keep it **muted by default**, and show a visible mute toggle.
+- Keep audio and motion on one clock: start the animation when `audio.play()` resolves, or schedule Web Audio `source.start(ctx.currentTime + offset)` and start the timeline at the same moment.
+- Preload the audio (`<audio preload="auto">` or decode the buffer first) so the first cue isn't late.
+
+### Sound credits
+
+Always deliver `sound/CREDITS.md` listing, for each file: source URL, author, license, and the edits made (trim, fades, offset, gain).
+
 ## Deliverables
 
 Provide:
@@ -257,7 +336,7 @@ Provide:
 6. Clean SVG source.
 7. Reduced-motion fallback.
 8. Export guidance for MP4, WebM, GIF, Lottie, or social platforms.
-9. Optional sound-design brief.
+9. Sound, only if the user asked for it: edited sync-mapped audio (WAV + MP4 with audio) and `sound/CREDITS.md`.
 10. Clear revision options: speed, easing, reveal order, colors, masks, loop point, and background.
 
 ## Quality checklist
@@ -274,6 +353,7 @@ Before delivering, verify:
 - The implementation works responsively.
 - Reduced-motion users receive a usable static version.
 - The result is original and not a copy of the reference animation.
+- If sound is included: every cue lands within one frame of its visual event, there are no clicks, loudness is on target, and every file's license is confirmed and credited.
 
 ## Interaction example
 
@@ -284,6 +364,7 @@ Response:
 2. If no reference is supplied, propose three directions.
 3. Wait for the user’s choice or approval.
 4. Build the selected animation with a storyboard, code, preview, and export guidance.
+5. Once the visuals are approved, ask whether they want sound. If yes, source, edit and sync it as described in **Sound design**.
 
 **User:** “Here is my logo and a reference video.”
 
